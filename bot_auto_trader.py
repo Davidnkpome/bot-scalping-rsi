@@ -1,19 +1,15 @@
 # bot_auto_trader.py
-import time
+import time, datetime, csv, os, requests
 import pandas as pd
 import ta
-import datetime
-import csv
-import os
-import requests
-from cleanup_old_logs import clean_old_logs
-from binance_live import execute_trade, paper_trading
-from binance.client import Client
 from dotenv import load_dotenv
+from binance.client import Client
+from binance_live import execute_trade, paper_trading
+from cleanup_old_logs import clean_old_logs
 
-# === INIT ===
+# === INIT
 load_dotenv()
-clean_old_logs()  # Nettoyage automatique au lancement
+clean_old_logs()
 
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
@@ -28,7 +24,7 @@ rsi_period = 14
 rsi_buy = 30
 rsi_sell = 70
 qty = 0.001
-interval = 60
+interval = 60  # seconds
 
 take_profit_pct = 0.005
 stop_loss_pct = 0.002
@@ -50,17 +46,37 @@ def notify_telegram(msg):
         except:
             print("❌ Notification Telegram échouée")
 
+def check_kill_switch():
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if "result" in data:
+            for msg in data["result"][::-1]:
+                txt = msg.get("message", {}).get("text", "").strip().upper()
+                chat_id = str(msg.get("message", {}).get("chat", {}).get("id", ""))
+                if txt == "KILL" and chat_id == TELEGRAM_CHAT_ID:
+                    notify_telegram("🛑 Bot arrêté manuellement par sécurité.")
+                    with open(LOG_FILE, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        writer.writerow([now, "MANUAL_KILL", "", "", "", "", ""])
+                    exit(0)
+    except:
+        pass
+
 print("🚀 Bot SCALPING PRO (RSI + MACD + TP/SL) - LIVE")
 
 while True:
     try:
+        check_kill_switch()
+
         klines = client.get_klines(symbol=symbol, interval=timeframe, limit=100)
         df = pd.DataFrame(klines, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time", "qav", "trades", "tb_base", "tb_quote", "ignore"])
         df["close"] = pd.to_numeric(df["close"])
 
-        rsi = ta.momentum.RSIIndicator(df["close"], window=rsi_period)
+        df["RSI"] = ta.momentum.RSIIndicator(df["close"], window=rsi_period).rsi()
         macd = ta.trend.MACD(df["close"])
-        df["RSI"] = rsi.rsi()
         df["MACD"] = macd.macd()
         df["MACD_signal"] = macd.macd_signal()
 
@@ -97,7 +113,7 @@ while True:
                 in_position = False
 
         if action:
-            if "FAIL" not in action:  # log only executed trades
+            if "FAIL" not in action:
                 with open(LOG_FILE, "a", newline="") as f:
                     writer = csv.writer(f)
                     writer.writerow([now, action, round(price_now, 2), round(latest_rsi, 2), round(macd_now, 4), round(signal_now, 4), round(pnl*100, 2)])
