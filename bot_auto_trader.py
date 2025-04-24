@@ -2,10 +2,12 @@
 import time, datetime, csv, os, requests
 import pandas as pd
 import ta
+import threading
 from dotenv import load_dotenv
 from binance.client import Client
 from binance_live import execute_trade, paper_trading
 from cleanup_old_logs import clean_old_logs
+from healthcheck import PingHandler, HTTPServer
 
 # === INIT
 load_dotenv()
@@ -66,6 +68,12 @@ def check_kill_switch():
         pass
 
 print("🚀 Bot SCALPING PRO (RSI + MACD + TP/SL) - LIVE")
+
+def start_healthcheck_server():
+    server = HTTPServer(('', 8080), PingHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+start_healthcheck_server()
 
 while True:
     try:
