@@ -3,3 +3,5 @@ pandas
 ta
 python-dotenv
 requests
+streamlit
+
